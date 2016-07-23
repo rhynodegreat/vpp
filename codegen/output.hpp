@@ -75,7 +75,7 @@ struct ParsedParam
 	ParsedParam* countPar = nullptr;
 	const Param* countMember = nullptr;
 
-	//if parsed param is count
+	//if parsed param is count it references all data params
 	std::vector<ParsedParam*> dataPars;
 	bool memberAsCount = false; //if it is count, whether the count is only a struct member
 

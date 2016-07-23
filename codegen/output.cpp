@@ -707,7 +707,6 @@ void CCOutputGenerator::printStruct(const Struct& type)
 	}
 
 	//TODO: union ctors that initialize the different members?
-
 	//explicit conversion function
 	structs_ << "\n\tconst " << type.name << "& vkHandle() const { return reinterpret_cast<const "
 			<< type.name << "&>(*this); }\n";
@@ -727,17 +726,23 @@ void CCOutputGenerator::printCmd(const Command& cmd)
 	name[0] = std::tolower(name[0], std::locale());
 
 	auto parsed = parseCommand(cmd);
+	std::string retName = typeName(cmd.signature.returnType);
 
+	//check if there is a return parameter
+	//must be wihtout countPar since we dont return a vector.
 	if(parsed.returnParam && !parsed.returnParam->countPar)
 	{
 		auto typeCpy = parsed.returnParam->param->type;
 		typeCpy.pointerlvl--;
-		functions_ << "inline " << typeName(typeCpy) << " " << name << "(";
+		retName = typeName(typeCpy);
 	}
-	else
-	{
-		functions_ << "inline " << typeName(cmd.signature.returnType) << " " << name << "(";
-	}
+
+	//wrap return type into result if needed.
+	std::string resultRetName = "Result<" + retName + ">";
+	if(retName == "Result") resultRetName = "Result<void>";
+	else if(retName == "void") resultRetName = "void";
+
+	functions_ << "inline " << resultRetName << " " << name << "(";
 
 	auto printVecVersion = false;
 	auto declSepr = "";
@@ -764,8 +769,8 @@ void CCOutputGenerator::printCmd(const Command& cmd)
 
 	if(retType.type->name == "VkResult")
 	{
-		before = "VPP_CALL(static_cast<Result>(";
-		after = "));";
+		before = "auto res = ";
+		after = "return {res}";
 	}
 
 	if(parsed.returnParam && !parsed.returnParam->countPar)
@@ -773,7 +778,7 @@ void CCOutputGenerator::printCmd(const Command& cmd)
 		auto typeCpy = parsed.returnParam->param->type;
 		typeCpy.pointerlvl--;
 		before = typeName(typeCpy) + " ret = {};\n\t" + before;
-		after = after + "\n\treturn ret;";
+		after = after + "\n\treturn {ret, ;";
 	}
 	else if(retType.type->name != "void" || retType.pointerlvl > 0)
 	{
@@ -826,6 +831,8 @@ void CCOutputGenerator::printVecCmd(const ParsedCommand& pcmd, const std::string
 	auto& cmd = *pcmd.command;
 
 	std::pair<const ParsedParam*, const ParsedParam*> vecRetStackVar;
+
+	//vec ret will hold the 2 params that form the return vector if there is any
 	std::pair<const ParsedParam*, const ParsedParam*>* vecRet = nullptr;
 	if(pcmd.returnParam && pcmd.returnParam->countPar)
 	{
@@ -834,16 +841,24 @@ void CCOutputGenerator::printVecCmd(const ParsedCommand& pcmd, const std::string
 		vecRet->second = pcmd.returnParam->countPar;
 	}
 
-	std::string retType = typeName(cmd.signature.returnType);
+	std::string retName = typeName(cmd.signature.returnType);
+
+	//if vector is returned parse it
+	//void* + size will be converted to std::vector<uint8_t>
 	if(vecRet)
 	{
 		auto typeCpy = vecRet->first->param->type;
 		typeCpy.pointerlvl--;
-		if(typeCpy.type->name != "void") retType = "std::vector<" + typeName(typeCpy) + ">";
-		else retType = "std::vector<uint8_t>";
+		if(typeCpy.type->name != "void") retName = "std::vector<" + typeName(typeCpy) + ">";
+		else retName = "std::vector<uint8_t>";
 	}
 
-	functions_ << "inline " << retType << " " << name << "(";
+	//wrap return type name into result if needed.
+	std::string retResultName = "Result<" + retName + ">";
+	if(retName == "Result") retResultName = "Result<void>";
+	else if(retName == "void") retResultName = "void";
+
+	functions_ << "inline " << retResultName << " " << name << "(";
 
 	auto declSepr = "";
 	auto callSepr = "";
@@ -907,13 +922,13 @@ void CCOutputGenerator::printVecCmd(const ParsedCommand& pcmd, const std::string
 		std::string returnStringEnd;
 		if(retType.type->name == "VkResult")
 		{
-			returnString = "return VPP_CALL(";
-			returnStringEnd = ")";
+			returnString = "return {(";
+			returnStringEnd = "), VPP_FUNC_NAME}";
 		}
 		else if(retType.type->name != "void" || retType.pointerlvl > 0)
 		{
-			returnString = "return static_cast<" + typeName(cmd.signature.returnType) + ">(";
-			returnStringEnd = ")";
+			returnString = "return {static_cast<" + typeName(cmd.signature.returnType) + ">(";
+			returnStringEnd = "), VPP_FUNC_NAME}";
 		}
 
 		functions_ << "\t" << returnString << cmd.name << "(" << args;
